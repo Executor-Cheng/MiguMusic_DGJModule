@@ -1,4 +1,5 @@
-﻿using Newtonsoft.Json;
+﻿using HtmlAgilityPack;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
@@ -9,7 +10,6 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
-using HtmlAgilityPack;
 
 namespace MiguMusic_DGJModule.MiguMusic
 {
@@ -108,25 +108,51 @@ namespace MiguMusic_DGJModule.MiguMusic
 
         public static string GetSongUrl(string copyrightId)
         {
-            string payload = new JObject { ["copyrightId"] = copyrightId }.ToString(0);
-            string json = HttpHelper.HttpGet($"http://music.migu.cn/v3/api/music/audioPlayer/getPlayInfo?{GetQueryString(payload)}", headers: DefaultHeaders);
-            try
+            /*
+               BQ: 1
+               HQ: 2
+               SQ: 3
+               BIT24: 4
+               D3: 5
+             */
+            string internalGetSongUrl(int type)
             {
-                JObject j = JObject.Parse(json);
-                if (j["returnCode"].ToObject<int>() == 0)
+                string payload = new JObject
                 {
-                    string playUrl = (j["data"]["hqPlayInfo"] ?? j["data"]["bqPlayInfo"] ?? throw new NotSupportedException("无法获取歌曲下载链接"))["playUrl"].ToString();
-                    return !string.IsNullOrEmpty(playUrl) ? playUrl : throw new NotSupportedException("无法获取歌曲下载链接");
+                    ["copyrightId"] = copyrightId,
+                    ["type"] = type,
+                }.ToString(0);
+                string json = HttpHelper.HttpGet($"http://music.migu.cn/v3/api/music/audioPlayer/getPlayInfo?{GetQueryString(payload)}", headers: DefaultHeaders);
+                try
+                {
+                    JObject j = JObject.Parse(json);
+                    if (j["returnCode"].ToObject<int>() == 0) // 反正没有对应品质的也会返回最差品质作为保底，不考虑给定歌曲没有HQ品质的情况
+                    {
+                        string playUrl = j["data"]["playUrl"]?.ToString();
+                        return !string.IsNullOrEmpty(playUrl) ? playUrl : throw new NotSupportedException("无法获取歌曲下载链接");
+                    }
+                    else
+                    {
+                        throw new NotImplementedException("意外的服务器返回");
+                    }
                 }
-                else
+                catch (JsonReaderException)
                 {
                     throw new NotImplementedException("意外的服务器返回");
                 }
             }
-            catch (JsonReaderException)
+            for (int i = 2; i > 0; i--)
             {
-                throw new NotImplementedException("意外的服务器返回");
+                try
+                {
+                    return internalGetSongUrl(i);
+                }
+                catch (NotSupportedException)
+                {
+
+                }
             }
+            throw new NotSupportedException("无法获取歌曲下载链接");
         }
 
         public static SongInfo[] GetPlaylist(long id)
